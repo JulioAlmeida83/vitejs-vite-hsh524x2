@@ -9,8 +9,8 @@ import {
 } from "recharts";
 
 /** ===================== Persistência ===================== */
-const STORAGE_KEY = "racEntries_v5"; // bump para evitar conflitos com o antigo
-const OPTIONS_KEY = "racOptions_v5";
+const STORAGE_KEY = "racEntries_v4";
+const OPTIONS_KEY = "racOptions_v4";
 
 /** ===================== Opções padrão ===================== */
 const DEFAULT_OPTIONS = {
@@ -27,11 +27,10 @@ const DEFAULT_OPTIONS = {
     "Outro (especificar)",
   ],
   UNIDADES: ["CJ", "NLC"],
-  // ATIVIDADE = o que você fez (canal, reunião, etc.)
   ATIVIDADES: [
-    "Whatsapp",
-    "Email",
-    "Telefone",
+    "Interação Whatsapp",
+    "Interação Email",
+    "Interação Telefone",
     "Reunião interna do órgão",
     "Reunião externa",
     "Estudos temáticos",
@@ -42,14 +41,12 @@ const DEFAULT_OPTIONS = {
     "CONEXÕES - GERAL",
     "CONEXÕES - COORD",
   ],
-  // MANIFESTAÇÃO = peça/entrega jurídica
   MANIFESTACOES: [
-    "Parecer",
-    "Cota",
-    "Nota-Técnica",
-    "Despacho",
-    "Minuta de Informações em MS",
-    "Minutas para a Adm",
+    "Interação Whatsapp",
+    "Interação Email",
+    "Interação Telefone",
+    "Reunião interna do órgão",
+    "Reunião externa",
   ],
   COM_QUEM: [
     "Colegas CJ",
@@ -76,7 +73,9 @@ const DEFAULT_OPTIONS = {
 } as const;
 
 /** ===================== Utilidades ===================== */
-function pad2(n: number) { return n.toString().padStart(2, "0"); }
+function pad2(n: number) {
+  return n.toString().padStart(2, "0");
+}
 function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -97,8 +96,8 @@ const HORAS = timeOptions(7, 21, 5);
 type Entry = {
   id: string;
   unidade: string;
-  atividade: string;        // "Com quem" se relaciona com ATIVIDADE
-  manifestacao: string;     // peça/entrega
+  atividade: string;        // excludente com manifestacao
+  manifestacao: string;     // excludente com atividade
   comQuem: string[];        // até 3
   duracao: string;
   dificuldade: "Baixa" | "Média" | "Alta" | "Altíssima" | "";
@@ -117,7 +116,9 @@ function loadEntries(): Entry[] {
   try {
     const arr = JSON.parse(raw) as Entry[];
     return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 function saveEntries(entries: Entry[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
@@ -125,8 +126,12 @@ function saveEntries(entries: Entry[]) {
 function loadOptions() {
   const raw = localStorage.getItem(OPTIONS_KEY);
   if (!raw) return { ...DEFAULT_OPTIONS };
-  try { return { ...DEFAULT_OPTIONS, ...JSON.parse(raw) }; }
-  catch { return { ...DEFAULT_OPTIONS }; }
+  try {
+    const obj = JSON.parse(raw);
+    return { ...DEFAULT_OPTIONS, ...obj };
+  } catch {
+    return { ...DEFAULT_OPTIONS };
+  }
 }
 function saveOptions(opts: any) {
   localStorage.setItem(OPTIONS_KEY, JSON.stringify(opts));
@@ -135,7 +140,18 @@ function saveOptions(opts: any) {
 /** ===================== Export/Import ===================== */
 function toCSV(entries: Entry[]) {
   const headers = [
-    "id","unidade","atividade","manifestacao","comQuem","duracao","dificuldade","urgente","data","hora","observacoes","transcricao",
+    "id",
+    "unidade",
+    "atividade",
+    "manifestacao",
+    "comQuem",
+    "duracao",
+    "dificuldade",
+    "urgente",
+    "data",
+    "hora",
+    "observacoes",
+    "transcricao",
   ];
   const lines = [headers.join(",")];
   for (const e of entries) {
@@ -158,7 +174,9 @@ function download(filename: string, content: string, mime = "text/plain") {
   const blob = new Blob([content], { type: `${mime};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
+  a.href = url;
+  a.download = filename;
+  a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -243,20 +261,20 @@ function EntryForm({
   onSubmit,
   initial,
   options,
-  onCancel,\n  onAddOption,\n}: {
+  onCancel,
+}: {
   onSubmit: (e: Entry) => void;
   initial?: Partial<Entry>;
   options: typeof DEFAULT_OPTIONS;
   onCancel?: () => void;
-  onAddOption: (listKey: keyof typeof DEFAULT_OPTIONS, value: string) => void;
 }) {
   const [unidade, setUnidade] = useState<string>(initial?.unidade ?? options.UNIDADES[0] ?? "");
 
-  // campos independentes (NÃO excludentes)
+  // excludentes
   const [atividade, setAtividade] = useState<string>(initial?.atividade ?? "");
   const [manifestacao, setManifestacao] = useState<string>(initial?.manifestacao ?? "");
 
-  // "Com quem" (até 3) — RELACIONADO À ATIVIDADE
+  // comQuem (até 3) — só quando há manifestação
   const [comQuem, setComQuem] = useState<string[]>(initial?.comQuem ?? []);
 
   const [duracao, setDuracao] = useState<string>(initial?.duracao ?? options.DURATIONS[0] ?? "");
@@ -279,7 +297,7 @@ function EntryForm({
 
   const editingId = initial?.id;
 
-  // gravação + (se disponível) transcrição
+  // inicia gravação + (se disponível) transcrição
   async function startRec() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -297,6 +315,7 @@ function EntryForm({
       };
       mr.start();
 
+      // tentar Web Speech API (Chrome/Android)
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
         const rec = new SpeechRecognition();
@@ -312,34 +331,55 @@ function EntryForm({
           }
           if (finalText) setTranscricao((prev) => (prev ? prev + " " + finalText : finalText));
         };
-        rec.onerror = () => {};
+        rec.onerror = () => {}; // ignora
         rec.start();
       }
+
       setIsRecording(true);
     } catch {
       alert("Permissão de microfone negada.");
     }
   }
+
   function stopRec() {
     const mr = mediaRecorderRef.current;
     if (mr && mr.state !== "inactive") mr.stop();
+
     const rec = recognitionRef.current;
     if (rec && rec.stop) rec.stop();
+
     setIsRecording(false);
   }
-  function clearAudio() { setAudioData(undefined); }
 
-  // multi-select até 3 (Com quem)
+  function clearAudio() {
+    setAudioData(undefined);
+  }
+
+  // lógica excludente
+  function handleAtividade(v: string) {
+    setAtividade(v);
+    if (v) {
+      setManifestacao("");
+      setComQuem([]); // “Com quem” só faz sentido com manifestação
+    }
+  }
+  function handleManifestacao(v: string) {
+    setManifestacao(v);
+    if (v) setAtividade("");
+  }
+
+  // multi-select até 3
   function handleComQuemChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
     if (selected.length > 3) selected.pop();
     setComQuem(selected);
   }
 
-  // transcrição → Observações (opcional)
+  // ao finalizar, opcionalmente joga a transcrição para Observações
   useEffect(() => {
     if (!autoAppendToObs) return;
     if (transcricao) {
+      // evita duplicar: apenas garante que o obs contém a transcrição mais recente
       const tag = "[Transcrição]: ";
       const clean = (obs || "").replace(new RegExp(`${tag}.*$`, "s"), "").trim();
       const joined = clean ? `${clean}\n${tag}${transcricao}` : `${tag}${transcricao}`;
@@ -349,15 +389,13 @@ function EntryForm({
   }, [transcricao]);
 
   function submit() {
-    // Regras de validação:
-    // 1) Pelo menos um entre ATIVIDADE ou MANIFESTAÇÃO precisa estar preenchido
+    // Validações simples
     if (!atividade && !manifestacao) {
-      alert("Preencha Atividade e/ou Manifestação.");
+      alert("Preencha Atividade OU Manifestação.");
       return;
     }
-    // 2) Se houver ATIVIDADE, exigir COM QUEM (até 3)
-    if (atividade && comQuem.length === 0) {
-      alert('Preencha "Com quem" (até 3) quando houver Atividade.');
+    if (manifestacao && comQuem.length === 0) {
+      alert('Preencha "Com quem" (até 3) quando houver Manifestação.');
       return;
     }
 
@@ -382,115 +420,40 @@ function EntryForm({
   return (
     <Section title={editingId ? "Editar registro" : "Novo registro"}>
       <Row label="Unidade">
-        <select
-          value={unidade}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__add__") {
-              const novo = prompt("Nova unidade:")?.trim();
-              if (novo) {
-                onAddOption("UNIDADES", novo);
-                setUnidade(novo);
-              } else {
-                e.target.value = unidade;
-              }
-              return;
-            }
-            setUnidade(v);
-          }}
-          style={inputStyle}
-        >
+        <select value={unidade} onChange={(e) => setUnidade(e.target.value)} style={inputStyle}>
           {options.UNIDADES.map((u) => (
             <option key={u} value={u}>{u}</option>
           ))}
-          <option value="__add__">+ Adicionar…</option>
         </select>
       </Row>
 
       <Row label="Atividade">
-        <select
-          value={atividade}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__add__") {
-              const novo = prompt("Nova atividade:")?.trim();
-              if (novo) {
-                onAddOption("ATIVIDADES", novo);
-                setAtividade(novo);
-              } else {
-                e.target.value = atividade;
-              }
-              return;
-            }
-            setAtividade(v);
-          }}
-          style={inputStyle}
-        >
+        <select value={atividade} onChange={(e) => handleAtividade(e.target.value)} style={inputStyle}>
           <option value="">— Selecione —</option>
           {options.ATIVIDADES.map((a) => (
             <option key={a} value={a}>{a}</option>
           ))}
-          <option value="__add__">+ Adicionar…</option>
         </select>
       </Row>
 
-      {atividade && (
-        <Row label="Com quem (máx. 3)">
-          <div style={{ display: "grid", gap: 6 }}>
-            <select multiple value={comQuem} onChange={handleComQuemChange} style={{ ...inputStyle, height: 110 }}>
-              {options.COM_QUEM.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => {
-                const novo = prompt("Novo contato (Com quem):")?.trim();
-                if (novo) {
-                  onAddOption("COM_QUEM", novo);
-                  setComQuem((prev) => {
-                    const next = Array.from(new Set([...(prev || []), novo])).slice(0, 3);
-                    return next;
-                  });
-                }
-              }}
-              style={btn("ghost")}
-            >
-              + Adicionar em "Com quem"
-            </button>
-          </div>
-        </Row>
-      )}
-          </select>
-        </Row>
-      )}
-
       <Row label="Manifestação">
-        <select
-          value={manifestacao}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__add__") {
-              const novo = prompt("Nova manifestação:")?.trim();
-              if (novo) {
-                onAddOption("MANIFESTACOES", novo);
-                setManifestacao(novo);
-              } else {
-                e.target.value = manifestacao;
-              }
-              return;
-            }
-            setManifestacao(v);
-          }}
-          style={inputStyle}
-        >
+        <select value={manifestacao} onChange={(e) => handleManifestacao(e.target.value)} style={inputStyle}>
           <option value="">— Selecione —</option>
           {options.MANIFESTACOES.map((i) => (
             <option key={i} value={i}>{i}</option>
           ))}
-          <option value="__add__">+ Adicionar…</option>
         </select>
       </Row>
+
+      {manifestacao && (
+        <Row label="Com quem (máx. 3)">
+          <select multiple value={comQuem} onChange={handleComQuemChange} style={{ ...inputStyle, height: 110 }}>
+            {options.COM_QUEM.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        </Row>
+      )}
 
       <Row label="Duração">
         <select value={duracao} onChange={(e) => setDuracao(e.target.value)} style={inputStyle}>
@@ -503,7 +466,7 @@ function EntryForm({
       <Row label="Dificuldade">
         <select
           value={dificuldade}
-          onChange={(e) => setDificuldade(e.target.value as Entry["dificuldade"]) }
+          onChange={(e) => setDificuldade(e.target.value as Entry["dificuldade"])}
           style={inputStyle}
         >
           <option value="">— Selecione —</option>
@@ -603,11 +566,10 @@ function Summary({ entries }: { entries: Entry[] }) {
   const totalMin = useMemo(() => entries.reduce((acc, e) => acc + durationMinutes(e.duracao), 0), [entries]);
   const horas = (totalMin / 60).toFixed(1);
 
-  // Prioriza agrupar por Manifestação (peça); se não tiver, usa Atividade
-  const agrupado = useMemo(() => {
+  const porAtividade = useMemo(() => {
     const map = new Map<string, number>();
     for (const e of entries) {
-      const key = e.manifestacao || e.atividade || "—";
+      const key = e.atividade || `(via ${e.manifestacao})`;
       map.set(key, (map.get(key) || 0) + 1);
     }
     return Array.from(map.entries()).map(([name, qty]) => ({ name, qty }));
@@ -628,7 +590,7 @@ function Summary({ entries }: { entries: Entry[] }) {
 
       <div style={{ height: 240, marginTop: 12 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={agrupado}>
+          <BarChart data={porAtividade}>
             <XAxis dataKey="name" interval={0} angle={-15} textAnchor="end" height={60} />
             <YAxis allowDecimals={false} />
             <Tooltip />
@@ -637,14 +599,22 @@ function Summary({ entries }: { entries: Entry[] }) {
         </ResponsiveContainer>
       </div>
       <p style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
-        Contagem por Manifestação (ou Atividade, quando não houver Manifestação) e tempo total estimado.
+        Gráfico usa contagem por atividade (ou “via Manifestação”) e tempo total estimado.
       </p>
     </Section>
   );
 }
 
 /** ===================== Linha da lista ===================== */
-function ListRow({ e, onEdit, onDelete }: { e: Entry; onEdit: (e: Entry) => void; onDelete: (id: string) => void; }) {
+function ListRow({
+  e,
+  onEdit,
+  onDelete,
+}: {
+  e: Entry;
+  onEdit: (e: Entry) => void;
+  onDelete: (id: string) => void;
+}) {
   return (
     <div style={{
       border: "1px solid #e5e7eb",
@@ -656,7 +626,7 @@ function ListRow({ e, onEdit, onDelete }: { e: Entry; onEdit: (e: Entry) => void
     }}>
       <div>
         <div style={{ fontWeight: 600 }}>
-          {(e.manifestacao || e.atividade) || "—" }{" "}
+          {e.atividade || e.manifestacao}{" "}
           <span style={{ fontSize: 12, color: "#6b7280" }}>• {e.unidade}</span>
           {e.urgente && (
             <span style={{
@@ -669,14 +639,14 @@ function ListRow({ e, onEdit, onDelete }: { e: Entry; onEdit: (e: Entry) => void
           )}
         </div>
         <div style={{ fontSize: 12, color: "#6b7280" }}>
-          {e.data} às {e.hora} — {e.atividade ? (
+          {e.data} às {e.hora} —{" "}
+          {e.manifestacao ? (
             <>
-              {e.atividade}
+              {e.manifestacao}
               {e.comQuem?.length ? ` → ${e.comQuem.join(", ")}` : ""}
-              {e.manifestacao ? ` • Manifestação: ${e.manifestacao}` : ""}
             </>
           ) : (
-            e.manifestacao || "—"
+            e.atividade
           )}{" "}
           • Duração: {e.duracao} • Dificuldade: {e.dificuldade || "—"}
         </div>
@@ -707,15 +677,6 @@ export default function App() {
   const [filterUnidade, setFilterUnidade] = useState<string>("todas");
   const [rangeStart, setRangeStart] = useState<string>("");
   const [rangeEnd, setRangeEnd] = useState<string>("");
-
-  // Permite adicionar opções dinamicamente a partir dos selects
-  function handleAddOption(listKey: keyof typeof DEFAULT_OPTIONS, value: string) {
-    if (!value.trim()) return;
-    setOpts((prev: any) => ({
-      ...prev,
-      [listKey]: Array.from(new Set([...(prev[listKey] || []), value.trim()])),
-    }));
-  }
 
   const filtered = useMemo(() => {
     return entries.filter((e) => {
@@ -809,7 +770,7 @@ export default function App() {
 
   return (
     <div style={{
-      maxWidth: 480,
+      maxWidth: 480,              // largura ideal pra smartphone
       margin: "0 auto",
       padding: 12,
       paddingBottom: 80,
@@ -831,11 +792,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Formulário */}
+      {/* Registrar */}
       {!editing ? (
-        <EntryForm onSubmit={upsert} options={opts} onAddOption={handleAddOption} />
+        <EntryForm onSubmit={upsert} options={opts} />
       ) : (
-        <EntryForm onSubmit={upsert} options={opts} initial={editing} onCancel={() => setEditing(null)} onAddOption={handleAddOption} />
+        <EntryForm onSubmit={upsert} options={opts} initial={editing} onCancel={() => setEditing(null)} />
       )}
 
       {/* Lista + filtros */}
